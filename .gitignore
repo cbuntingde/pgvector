@@ -1,14 +1,44 @@
-/dist/
-/log/
-/results/
-/tmp_check/
-/sql/vector--?.?.?.sql
-regression.*
+# Build artifacts
 *.o
-*.so
 *.bc
+*.so
 *.dll
 *.dylib
 *.obj
 *.lib
 *.exp
+
+# Build directories
+/dist/
+/log/
+/results/
+/tmp_check/
+/tmp/
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# Generated SQL files
+/sql/vector--?.?.?.sql
+
+# Test results
+regression.*
+test/output/
+test/log/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*~
+*.bak
+*.orig
