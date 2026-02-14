@@ -916,3 +916,116 @@ CREATE OPERATOR CLASS sparsevec_l1_ops
 	OPERATOR 1 <+> (sparsevec, sparsevec) FOR ORDER BY float_ops,
 	FUNCTION 1 l1_distance(sparsevec, sparsevec),
 	FUNCTION 3 hnsw_sparsevec_support(internal);
+
+-- RRF (Reciprocal Rank Fusion) for hybrid search
+
+CREATE FUNCTION rrf_score(rank int, k float8 DEFAULT 60) RETURNS float8
+	LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+	AS $$SELECT 1.0 / (k + $1)$$;
+
+CREATE FUNCTION rrf_score(rank bigint, k float8 DEFAULT 60) RETURNS float8
+	LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+	AS $$SELECT 1.0 / (k + $1)$$;
+
+COMMENT ON FUNCTION rrf_score(int, float8) IS
+	'Calculate RRF (Reciprocal Rank Fusion) score for a given rank. Use with SUM to combine ranked result lists. k defaults to 60.';
+
+COMMENT ON FUNCTION rrf_score(bigint, float8) IS
+	'Calculate RRF (Reciprocal Rank Fusion) score for a given rank (bigint version). Use with SUM to combine ranked result lists. k defaults to 60.';
+
+-- Sparse vector functions
+
+CREATE FUNCTION sparsevec_nnz(sparsevec) RETURNS int
+	AS 'MODULE_PATHNAME' LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+
+COMMENT ON FUNCTION sparsevec_nnz(sparsevec) IS
+	'Returns the number of non-zero elements in a sparse vector.';
+
+-- Multi-vector helper functions for ColBERT-style late interaction models
+
+-- Get max similarity (ColBERT-style) between query and set of vectors
+CREATE FUNCTION vector_max_sim(query vector, candidates vector[]) RETURNS float8
+	LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE
+AS $$
+DECLARE
+	sim float8 := 0;
+	v vector;
+BEGIN
+	FOREACH v IN ARRAY candidates LOOP
+		sim := GREATEST(sim, 1 - (query <=> v));
+	END LOOP;
+	RETURN sim;
+END;
+$$;
+
+-- Get sum of similarities
+CREATE FUNCTION vector_sum_sim(query vector, candidates vector[]) RETURNS float8
+	LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE
+AS $$
+DECLARE
+	sim float8 := 0;
+	v vector;
+BEGIN
+	FOREACH v IN ARRAY candidates LOOP
+		sim := sim + (1 - (query <=> v));
+	END LOOP;
+	RETURN sim;
+END;
+$$;
+
+-- Get mean of similarities
+CREATE FUNCTION vector_mean_sim(query vector, candidates vector[]) RETURNS float8
+	LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE
+AS $$
+BEGIN
+	RETURN vector_sum_sim(query, candidates) / array_length(candidates, 1);
+END;
+$$;
+
+COMMENT ON FUNCTION vector_max_sim(vector, vector[]) IS
+	'Returns the maximum cosine similarity between the query and any vector in the array. Useful for ColBERT-style late interaction models.';
+
+COMMENT ON FUNCTION vector_sum_sim(vector, vector[]) IS
+	'Returns the sum of cosine similarities between the query and all vectors in the array.';
+
+COMMENT ON FUNCTION vector_mean_sim(vector, vector[]) IS
+	'Returns the mean cosine similarity between the query and all vectors in the array.';
+
+-- Reranking functions for improving search results
+
+-- Combine multiple scores with weights (simple reranking)
+CREATE FUNCTION rerank_scores(
+    scores float8[],
+    weights float8[] DEFAULT ARRAY[1.0]
+) RETURNS float8[]
+	LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE
+AS $$
+DECLARE
+	result float8[] := '{}';
+BEGIN
+	FOR i IN 1..array_length(scores, 1) LOOP
+		result := result || COALESCE(scores[i] * weights[i], scores[i]);
+	END LOOP;
+	RETURN result;
+END;
+$$;
+
+-- Reorder results by combined score (descending)
+CREATE FUNCTION rerank_order(
+    ids bigint[],
+    scores float8[]
+) RETURNS TABLE(id bigint, score float8)
+	LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE
+AS $$
+BEGIN
+	FOR i IN REVERSE array_upper(scores, 1)..1 LOOP
+		RETURN QUERY SELECT ids[i], scores[i];
+	END LOOP;
+END;
+$$;
+
+COMMENT ON FUNCTION rerank_scores(float8[], float8[]) IS
+	'Combines multiple scores with optional weights. Each score is multiplied by its corresponding weight.';
+
+COMMENT ON FUNCTION rerank_order(bigint[], float8[]) IS
+	'Reorders ids by scores in descending order. Use with array_agg to rerank grouped results.';

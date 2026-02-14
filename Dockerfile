@@ -5,7 +5,8 @@ ARG DEBIAN_CODENAME=bookworm
 FROM postgres:$PG_MAJOR-$DEBIAN_CODENAME
 ARG PG_MAJOR
 
-ADD https://github.com/pgvector/pgvector.git#v0.8.1 /tmp/pgvector
+# Copy local pgvector source
+COPY . /tmp/pgvector
 
 RUN apt-get update && \
 		apt-mark hold locales && \

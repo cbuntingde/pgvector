@@ -1065,6 +1065,18 @@ sparsevec_l2_norm(PG_FUNCTION_ARGS)
 }
 
 /*
+ * Get the number of non-zero elements in a sparse vector
+ */
+FUNCTION_PREFIX PG_FUNCTION_INFO_V1(sparsevec_nnz);
+Datum
+sparsevec_nnz(PG_FUNCTION_ARGS)
+{
+	SparseVector *a = PG_GETARG_SPARSEVEC_P(0);
+
+	PG_RETURN_INT32(a->nnz);
+}
+
+/*
  * Normalize a sparse vector with the L2 norm
  */
 FUNCTION_PREFIX PG_FUNCTION_INFO_V1(sparsevec_l2_normalize);
